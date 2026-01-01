@@ -2,9 +2,9 @@
 
 A real-time WebGL simulation visualizing the emergence of self-replicating artificial life, based on the research paper *"Computational Life: How Well-formed, Self-replicating Programs Emerge from Simple Interaction"* (Agüera y Arcas et al., 2024).
 
-![Simulation Screenshot](./screenshot.png)
+![Simulation Screenshot](https://github.com/arabold/bff-computational-life/blob/7ed1889bd54b5e0b0b4e4fa5539a047ae6fba1f6/screenshot.png?raw=true)
 
-## 📄 The Science
+## 🔬 The Science
 
 This project implements the "BFF" (Brainfuck-derivative) virtual machine and interaction model described in the paper. It demonstrates how complex, self-replicating programs can spontaneously emerge from high-entropy random noise without an explicit fitness function.
 
