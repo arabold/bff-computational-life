@@ -1,12 +1,12 @@
 
-export enum SimulationState {
-  STOPPED,
-  RUNNING,
-  PAUSED
-}
 
 export type InteractionTopology = 'spatial' | 'global';
 export type SeedingMode = 'random' | 'balanced';
+
+export interface ChatMessage {
+  role: 'user' | 'model';
+  text: string;
+}
 
 export interface SimulationConfig {
   gridWidth: number;
@@ -36,9 +36,4 @@ export interface SimulationStats {
   entropy: number; // Shannon entropy of the grid (measure of order)
   zeroDensity: number; // Percentage of the grid filled with 0x00 (Sign of Zero-Poisoning)
   census?: CensusData; // Periodic snapshot of species
-}
-
-export interface ChatMessage {
-  role: 'user' | 'model';
-  text: string;
 }

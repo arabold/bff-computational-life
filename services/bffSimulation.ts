@@ -364,11 +364,6 @@ export class BFFSimulation {
     };
   }
 
-  // Deprecated: Kept for compatibility if needed
-  calculateEntropy(): number {
-      return this.calculateGridMetrics().entropy;
-  }
-
   execute(tape: Uint8Array): { complexity: number, copies: number, neighborWrites: number } {
     let head0 = 0;
     let head1 = 0; 

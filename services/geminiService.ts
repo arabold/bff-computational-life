@@ -1,19 +1,8 @@
-import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
+import { GoogleGenAI, Content } from "@google/genai";
 import { BFFSimulation, CMD_LEFT, CMD_RIGHT, CMD_H1_DEC, CMD_H1_INC, CMD_DEC, CMD_INC, CMD_COPY_0_TO_1, CMD_COPY_1_TO_0, CMD_JZ, CMD_JNZ } from "./bffSimulation";
 import { SimulationConfig, SimulationStats } from "../types";
 
-// Safe access to API Key
-const getApiKey = () => {
-  try {
-    // @ts-ignore
-    return (typeof process !== 'undefined' && process.env && process.env.API_KEY) ? process.env.API_KEY : '';
-  } catch (e) {
-    return '';
-  }
-};
-
-const apiKey = getApiKey();
-const ai = new GoogleGenAI({ apiKey });
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // --- SHARED CONTEXT & TERMINOLOGY ---
 const SCIENTIFIC_CONTEXT = `
@@ -67,7 +56,7 @@ const byteToChar = (byte: number) => {
 };
 
 export const explainOrganismCode = async (genome: Uint8Array): Promise<string> => {
-  if (!apiKey) {
+  if (!process.env.API_KEY) {
       return `<div class="p-2 bg-red-900/30 border border-red-500/50 rounded text-red-200 text-xs">
           <strong>Error:</strong> API Key missing.
       </div>`;
@@ -110,7 +99,7 @@ export const explainOrganismCode = async (genome: Uint8Array): Promise<string> =
 };
 
 export const analyzeEvolution = async (history: SimulationStats[], config: SimulationConfig): Promise<string> => {
-  if (!apiKey) return "<p class='text-red-400'>Error: API Key is missing.</p>";
+  if (!process.env.API_KEY) return "<p class='text-red-400'>Error: API Key is missing.</p>";
   if (history.length === 0) return "<p>Insufficient data for analysis.</p>";
 
   const latestStats = history[history.length - 1];
@@ -206,64 +195,62 @@ export const analyzeEvolution = async (history: SimulationStats[], config: Simul
   }
 };
 
-export async function* streamChat(history: any[], message: string) {
-  if (!apiKey) {
-    yield "Error: API Key is missing.";
-    return;
+export const streamChat = async function* (history: Content[], message: string) {
+  if (!process.env.API_KEY) {
+      yield "Error: API Key is missing.";
+      return;
   }
+
+  const chat = ai.chats.create({
+    model: 'gemini-3-flash-preview',
+    history: history,
+    config: {
+        systemInstruction: "You are a helpful scientific assistant for a simulation based on the paper 'Computational Life'. You explain concepts clearly.",
+    }
+  });
 
   try {
-    const chat = ai.chats.create({
-      model: "gemini-3-flash-preview",
-      history: history,
-      config: {
-        systemInstruction: SCIENTIFIC_CONTEXT,
+      const result = await chat.sendMessageStream({ message });
+      for await (const chunk of result) {
+          if (chunk.text) {
+              yield chunk.text;
+          }
       }
-    });
-
-    const result = await chat.sendMessageStream({ message });
-    
-    for await (const chunk of result) {
-      const c = chunk as GenerateContentResponse;
-      if (c.text) {
-        yield c.text;
-      }
-    }
-  } catch (e) {
-    console.error("Chat Error:", e);
-    yield "Error communicating with AI service.";
+  } catch (error: any) {
+      yield `Error: ${error.message}`;
   }
-}
+};
 
 export const generateImage = async (prompt: string, size: "1K" | "2K" | "4K"): Promise<string | null> => {
-  if (!apiKey) return null;
+  if (!process.env.API_KEY) return null;
 
+  // We use gemini-3-pro-image-preview because imageSize config is required
+  const model = 'gemini-3-pro-image-preview';
+  
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-image-preview',
+      model: model,
       contents: {
         parts: [{ text: prompt }]
       },
       config: {
         imageConfig: {
-          aspectRatio: "1:1",
-          imageSize: size
+            aspectRatio: "1:1",
+            imageSize: size
         }
       }
     });
-
-    for (const candidate of response.candidates || []) {
-      if (candidate.content && candidate.content.parts) {
-        for (const part of candidate.content.parts) {
-          if (part.inlineData && part.inlineData.data) {
+    
+    // Extract image
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
+        if (part.inlineData) {
             return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-          }
         }
-      }
     }
     return null;
-  } catch (error) {
-    console.error("Image Gen Error:", error);
-    return null;
+
+  } catch (e) {
+      console.error(e);
+      return null;
   }
 };

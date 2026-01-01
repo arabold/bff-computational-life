@@ -105,7 +105,22 @@ export const App: React.FC = () => {
 
       // Update Inspector Data if cell is selected
       if (selectedCell) {
-        setInspectorData(simulation.getCellAt(selectedCell.x, selectedCell.y));
+        setInspectorData(prev => {
+             const newData = simulation.getCellAt(selectedCell.x, selectedCell.y);
+             // Optimization: Check if byte content actually changed before updating state
+             // to prevent unnecessary re-renders of the InspectorPanel
+             if (prev && prev.length === newData.length) {
+                 let same = true;
+                 for(let i=0; i<prev.length; i++) {
+                     if (prev[i] !== newData[i]) {
+                         same = false;
+                         break;
+                     }
+                 }
+                 if (same) return prev; // Return same reference to skip render
+             }
+             return newData;
+        });
       }
 
       // Calculate Real EPS

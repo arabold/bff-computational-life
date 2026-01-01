@@ -42,7 +42,7 @@ This web application translates the mathematical model into an interactive exper
 *   **Real-time Physics:** Tunable simulation speed, mutation rates, and energy limits.
 *   **Determinism:** Seeded PRNG (Mulberry32) allows for repeatable simulation runs.
 *   **Inspector:** Drill down into individual memory tapes to see the exact code powering an organism.
-*   ** topologies:** Support for both Spatial (2D Grid) and Global (Primordial Soup) interaction rules.
+*   **Topologies:** Support for both Spatial (2D Grid) and Global (Primordial Soup) interaction rules.
 
 ## 🚀 Getting Started
 
