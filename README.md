@@ -60,12 +60,3 @@ This web application translates the mathematical model into an interactive exper
     ```bash
     npm start
     ```
-
-## 🎨 Color Legend
-
-*   <span style="color: #ff3c3c">■</span> **Red:** Move Instructions (`<`, `>`)
-*   <span style="color: #ff8c00">■</span> **Orange:** Copy/Replication (`.`, `,`) - *High orange density usually indicates life.*
-*   <span style="color: #3c78ff">■</span> **Blue:** Aux Pointer Control (`{`, `}`)
-*   <span style="color: #3cff3c">■</span> **Green:** Arithmetic (`+`, `-`)
-*   <span style="color: #b432ff">■</span> **Purple:** Loops (`[`, `]`)
-*   <span style="color: #333333">■</span> **Dark Gray/Black:** Null/Inert (`0` or non-instruction noise)
