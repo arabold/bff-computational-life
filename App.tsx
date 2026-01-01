@@ -140,8 +140,10 @@ export const App: React.FC = () => {
   const maxReplication = config.instructionLimit; 
   const maxComplexity = config.instructionLimit;
   
-  // Use last known census dominance or 0
-  const dominance = stats.census ? stats.census.dominance * 100 : 0;
+  // Use last known census dominance or 0 (Top species dominance)
+  const dominance = stats.census && stats.census.topSpecies.length > 0
+    ? stats.census.topSpecies[0].dominance * 100 
+    : 0;
   
   // Calculate efficiency ratio for the bar (Viable / Total)
   const replicationEfficiency = stats.replicationRate > 0 

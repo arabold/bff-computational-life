@@ -1,5 +1,5 @@
 // BFF (Brainfuck Extended) Simulation Engine
-import { SimulationConfig, CensusData, SimulationStats } from '../types';
+import { SimulationConfig, CensusData, SimulationStats, SpeciesData } from '../types';
 
 /**
  * --- SIMULATION PARAMETERS & PHYSICS ---
@@ -66,15 +66,15 @@ export class BFFSimulation {
     zeroDensity: 0,
     census: {
         speciesCount: 0,
-        topSpeciesCode: '',
-        topSpeciesCount: 0,
-        dominance: 0,
-        topSpeciesEntropy: 0
+        topSpecies: []
     }
   };
 
-  // History of stats for analysis
+  // History of stats for analysis (Optimized: sparsely populated)
   history: SimulationStats[] = [];
+  
+  // Track the last stats pushed to history for compression logic
+  private lastHistoryStats: SimulationStats | null = null;
 
   private epochInteractions = 0;
   private epochTotalComplexity = 0;
@@ -155,6 +155,7 @@ export class BFFSimulation {
     // Clear history and record the baseline snapshot
     this.history = [];
     this.history.push({ ...this.stats });
+    this.lastHistoryStats = { ...this.stats };
 
     this.epochInteractions = 0;
     this.epochTotalComplexity = 0;
@@ -263,15 +264,43 @@ export class BFFSimulation {
     this.stats.entropy = metrics.entropy;
     this.stats.zeroDensity = metrics.zeroDensity;
 
+    // Trigger Census if needed
     if (this.stats.epoch % this.CENSUS_INTERVAL === 0) {
         this.stats.census = this.performCensus();
+    } else {
+        this.stats.census = undefined;
     }
 
-    this.history.push({ 
-        ...this.stats, 
-        census: (this.stats.epoch % this.CENSUS_INTERVAL === 0) ? this.stats.census : undefined
-    });
+    // --- Smart History Compression ---
+    // Instead of pushing every epoch (which crashes memory on long runs),
+    // we only push "Interesting" epochs.
+    let shouldLog = false;
+    
+    // 1. Always log census epochs
+    if (this.stats.census) {
+        shouldLog = true;
+    } 
+    // 2. Log if significant change occurred since last log
+    else if (this.lastHistoryStats) {
+        const dEntropy = Math.abs(this.stats.entropy - this.lastHistoryStats.entropy);
+        const dZero = Math.abs(this.stats.zeroDensity - this.lastHistoryStats.zeroDensity);
+        
+        // Thresholds: 0.1 Entropy (visible structure change), 0.05 Zero (visible poisoning)
+        if (dEntropy > 0.1 || dZero > 0.05) {
+            shouldLog = true;
+        }
+    } else {
+        // Fallback for first run
+        shouldLog = true;
+    }
 
+    if (shouldLog) {
+        const snapshot = { ...this.stats }; // Clone
+        this.history.push(snapshot);
+        this.lastHistoryStats = snapshot;
+    }
+
+    // Reset counters
     this.epochInteractions = 0;
     this.epochTotalComplexity = 0;
     this.epochTotalCopies = 0;
@@ -283,46 +312,56 @@ export class BFFSimulation {
     const totalCells = this.width * this.height;
     const tapeSize = this.config.tapeSize;
 
-    // First Pass: Count species
-    for (let i = 0; i < totalCells; i++) {
+    // Optimization: Census Sampling
+    // Use a percentage (10%) of the board to estimate populations.
+    // Crucially, use deterministic strided sampling (no RNG) to preserve
+    // the main physics PRNG sequence. This ensures that observation
+    // does not alter the timeline.
+    const SAMPLE_RATE = 0.1;
+    let step = Math.floor(1 / SAMPLE_RATE);
+    
+    // Ensure stride is odd to avoid trivial resonance with even power-of-2 grid widths
+    if ((step & 1) === 0) step++; 
+
+    let actualSampleCount = 0;
+
+    for (let i = 0; i < totalCells; i += step) {
         const start = i * tapeSize;
+        
+        // Use subarray (view) to avoid copying, but toString() still copies.
         const genome = this.data.subarray(start, start + tapeSize);
         const key = genome.toString(); // "1,2,3"
         speciesMap.set(key, (speciesMap.get(key) || 0) + 1);
+        actualSampleCount++;
     }
 
-    // Find top species
-    let topCode = '';
-    let topCount = 0;
-    
-    for (const [code, count] of speciesMap.entries()) {
-        if (count > topCount) {
-            topCount = count;
-            topCode = code;
-        }
-    }
+    // Convert map to array and sort by count desc
+    const sortedSpecies = Array.from(speciesMap.entries())
+        .sort((a, b) => b[1] - a[1]) // Sort by count desc
+        .slice(0, 5); // Take top 5
 
-    // Calculate Entropy of Top Species
-    // Only parse if we have a winner
-    let topSpeciesEntropy = 0;
-    if (topCode) {
-        const genomeBytes = topCode.split(',').map(Number);
-        topSpeciesEntropy = BFFSimulation.calculateGenomeEntropy(new Uint8Array(genomeBytes));
-    }
+    const topSpecies: SpeciesData[] = sortedSpecies.map(([code, count], index) => {
+        const genomeBytes = code.split(',').map(Number);
+        const dominance = count / actualSampleCount;
+
+        return {
+            rank: index + 1,
+            code: code,
+            // Project estimated count for UI consistency (Sampled Count * Ratio)
+            count: Math.floor(dominance * totalCells),
+            dominance: dominance,
+            entropy: BFFSimulation.calculateGenomeEntropy(new Uint8Array(genomeBytes))
+        };
+    });
 
     return {
-        speciesCount: speciesMap.size,
-        topSpeciesCode: topCode, 
-        topSpeciesCount: topCount,
-        dominance: topCount / totalCells,
-        topSpeciesEntropy: topSpeciesEntropy
+        speciesCount: speciesMap.size, // Diversity within the sampled set
+        topSpecies: topSpecies
     };
   }
 
   /**
    * Helper: Calculate Shannon Entropy of a single genome
-   * High Entropy (~4+) = Complex / Random
-   * Low Entropy (<1) = Repetitive / Crystal
    */
   static calculateGenomeEntropy(genome: Uint8Array): number {
     const counts = new Int32Array(256);
@@ -340,27 +379,39 @@ export class BFFSimulation {
     return entropy;
   }
 
-  // Optimized Global Metrics
+  // Optimized Global Metrics with Sampling
   calculateGridMetrics(): { entropy: number, zeroDensity: number } {
     const counts = new Int32Array(256);
     const len = this.data.length;
     
-    // Single pass over the entire grid data
-    for (let i = 0; i < len; i++) {
+    // Sampling Strategy:
+    // Sample 10% of the bytes. This scales linearly with grid size.
+    // Use strided sampling (no RNG) to keep statistics deterministic
+    // and separate from physics.
+    const SAMPLE_RATE = 0.1;
+    let step = Math.floor(1 / SAMPLE_RATE);
+    
+    // Ensure step is odd to be coprime with power-of-2 tape sizes (avoiding grid alignment artifacts)
+    if ((step & 1) === 0) step++; 
+
+    let samples = 0;
+    // Use a fixed loop to ensure we don't go out of bounds
+    for (let i = 0; i < len; i += step) {
         counts[this.data[i]]++;
+        samples++;
     }
 
     let entropy = 0;
     for (let i = 0; i < 256; i++) {
         if (counts[i] > 0) {
-            const p = counts[i] / len;
+            const p = counts[i] / samples;
             entropy -= p * Math.log2(p);
         }
     }
 
     return {
         entropy,
-        zeroDensity: counts[0] / len
+        zeroDensity: counts[0] / samples
     };
   }
 

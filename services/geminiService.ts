@@ -105,31 +105,33 @@ export const analyzeEvolution = async (history: SimulationStats[], config: Simul
   const latestStats = history[history.length - 1];
   const latestEpoch = latestStats.epoch;
 
-  // 1. Prepare Historical Data Points (Sampled)
-  const sampleCount = 10;
-  const step = Math.max(1, Math.floor(history.length / sampleCount));
-  const timelineSamples = [];
-  for (let i = 0; i < history.length; i += step) {
-      timelineSamples.push(history[i]);
-  }
-  if (timelineSamples[timelineSamples.length - 1] !== latestStats) {
-      timelineSamples.push(latestStats);
-  }
+  // 1. Prepare Historical Data Points
+  // History is now already compacted by the simulation engine (Census snapshots + Significant Events)
+  // We can just use the last ~10 entries or so if it's very long, but passing all logic transitions is better.
+  const timelineSamples = history.length > 20 ? history.slice(history.length - 20) : history;
 
   const timelineStr = timelineSamples.map(h => {
-      const domStr = h.census ? `Dominance=${(h.census.dominance*100).toFixed(1)}%` : "";
-      return `Epoch ${h.epoch}: Entropy=${h.entropy.toFixed(2)}, ZeroDensity=${(h.zeroDensity*100).toFixed(1)}%, ViableRep=${h.effectiveReplication.toFixed(2)} ${domStr}`;
+      let censusInfo = "";
+      if (h.census) {
+         // Show top species info in timeline if available
+         censusInfo = ` [Census: TopSpeciesDom=${(h.census.topSpecies[0]?.dominance * 100).toFixed(1)}%]`;
+      }
+      return `Epoch ${h.epoch}: Entropy=${h.entropy.toFixed(2)}, ZeroDensity=${(h.zeroDensity*100).toFixed(1)}%, ViableRep=${h.effectiveReplication.toFixed(2)}${censusInfo}`;
   }).join('\n');
 
-  // 2. Prepare Dominant Species Data
-  let censusData = "Census Pending";
-  let dominantCode = "N/A";
+  // 2. Prepare Ecosystem Census Data
+  let censusHtml = "Census Pending";
+  let topSpeciesList = "N/A";
+  
   if (latestStats.census) {
-      censusData = `Species Count: ${latestStats.census.speciesCount}, Dominance: ${(latestStats.census.dominance * 100).toFixed(1)}%`;
-      if (latestStats.census.topSpeciesCode) {
-          const bytes = latestStats.census.topSpeciesCode.split(',').map(Number);
-          dominantCode = bytes.map(byteToChar).join('');
-      }
+      censusHtml = `Observed Species (Sampled): ${latestStats.census.speciesCount}`;
+      
+      const topSpeciesDescriptions = latestStats.census.topSpecies.map(s => {
+          const codeBytes = s.code.split(',').map(Number);
+          const codeStr = codeBytes.map(byteToChar).join('');
+          return `- Rank ${s.rank} (${(s.dominance * 100).toFixed(1)}%): \`${codeStr}\` (Entropy: ${s.entropy.toFixed(2)})`;
+      });
+      topSpeciesList = topSpeciesDescriptions.join('\n');
   }
 
   const prompt = `
@@ -137,44 +139,49 @@ export const analyzeEvolution = async (history: SimulationStats[], config: Simul
 
   **Current Simulation State (Epoch ${latestEpoch}):**
   - **Topology:** ${config.topology}
-  - **Census:** ${censusData}
-  - **Dominant Genome:** \`${dominantCode}\`
+  - **Census Data:** ${censusHtml}
   
-  **Historical Timeline Data:**
+  **Dominant Ecosystem (Top 5 Species):**
+  ${topSpeciesList}
+  
+  **Historical Timeline (Significant Events & Snapshots):**
   ${timelineStr}
 
   **Analysis Task:**
   Generate an "Epoch Report". Identify evolutionary events like "State Transition", "Zero-poisoning", or "Crystallization".
+  Analyze the competition between the top species if multiple exist.
   
   **Required HTML Template (No Markdown):**
   
   <h3>Epoch ${latestEpoch} Report</h3>
   
   <div class="mb-6 p-4 bg-gray-800/50 rounded-lg border border-gray-700">
-    <strong>TL;DR:</strong> [1-2 sentences. E.g., "A State Transition occurred at Epoch X," "Zero-Poisoning detected," or "The system has Crystallized."]
+    <strong>TL;DR:</strong> [1-2 sentences summary of the ecosystem state.]
   </div>
 
   <h4>Evolutionary History</h4>
   <ul class="list-disc pl-4 space-y-2 mb-6">
-    <li><strong>[Epoch Range]:</strong> [Event Description. Look for drops in Entropy (Crystallization) or spikes in Zero Density (Poisoning).]</li>
+    <li><strong>[Epoch Range]:</strong> [Event Description based on timeline]</li>
     <li><strong>Epoch ${latestEpoch} (Now):</strong> [Current Status]</li>
   </ul>
 
-  <h4>Current Ecosystem Analysis</h4>
+  <h4>Dominant Lifeforms</h4>
   <div class="space-y-3">
     <p>
-        <strong>Dominant Lifeform:</strong> <code>${dominantCode.substring(0, 32)}${dominantCode.length > 32 ? '...' : ''}</code><br/>
-        [Analyze the code. Is it a Trivial Replicator (simple copy loop) or a Complex Viable Replicator?]
+        <strong>Top Species:</strong> [Analyze the code of Rank 1. Is it complex? Is it a loop?]
     </p>
     <p>
-        <strong>System Health:</strong> [Entropy: ${latestStats.entropy.toFixed(2)}]. [Interpret: Is the system random noise (Pre-life), Crystallized (Low Entropy), or Poisoned?]
+        <strong>Biodiversity:</strong> [Comment on the other top species. Are they variants of Rank 1 or distinct competitors?]
+    </p>
+    <p>
+        <strong>System Health:</strong> [Entropy: ${latestStats.entropy.toFixed(2)}]. [Interpret: Random, Crystallized, or Poisoned?]
     </p>
   </div>
 
   **Rules:**
-  - Use <span class="text-green-400"> for positive terms (Viable, State Transition, Complex).
-  - Use <span class="text-yellow-400"> for warnings (Crystallization, Trivial Replicator).
-  - Use <span class="text-red-400"> for failures (Zero-poisoning, Extinction).
+  - Use <span class="text-green-400"> for positive terms.
+  - Use <span class="text-yellow-400"> for warnings.
+  - Use <span class="text-red-400"> for failures.
   - **Do not** use backticks for code in the output, use <code> tags.
   `;
 

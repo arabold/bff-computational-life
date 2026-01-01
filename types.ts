@@ -20,12 +20,17 @@ export interface SimulationConfig {
   seed: number; // Deterministic seed
 }
 
+export interface SpeciesData {
+    rank: number;
+    code: string;
+    count: number;
+    dominance: number; // 0.0 to 1.0 (percentage of grid)
+    entropy: number;
+}
+
 export interface CensusData {
     speciesCount: number; // Total unique genomes
-    topSpeciesCode: string; // The specific bytecode string of the winner
-    topSpeciesCount: number; // How many agents have this code
-    dominance: number; // 0.0 to 1.0 (percentage of grid)
-    topSpeciesEntropy: number; // Shannon entropy of the winner's genome
+    topSpecies: SpeciesData[]; // List of top dominant species (e.g. top 5)
 }
 
 export interface SimulationStats {
