@@ -41,4 +41,5 @@ export interface SimulationStats {
   entropy: number; // Shannon entropy of the grid (measure of order)
   zeroDensity: number; // Percentage of the grid filled with 0x00 (Sign of Zero-Poisoning)
   census?: CensusData; // Periodic snapshot of species
+  lastCensusEpoch?: number; // Epoch at which the last census was performed
 }

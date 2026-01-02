@@ -6,6 +6,7 @@ interface SimulationCanvasProps {
   running: boolean;
   speed: number;
   onCellClick?: (x: number, y: number) => void;
+  autoStep?: boolean; // If true, the canvas component drives the loop (fallback mode)
 }
 
 const VERTEX_SHADER = `
@@ -64,7 +65,7 @@ void main() {
 }
 `;
 
-export const SimulationCanvas: React.FC<SimulationCanvasProps> = ({ simulation, running, speed, onCellClick }) => {
+export const SimulationCanvas: React.FC<SimulationCanvasProps> = ({ simulation, running, speed, onCellClick, autoStep = false }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
@@ -302,7 +303,7 @@ export const SimulationCanvas: React.FC<SimulationCanvasProps> = ({ simulation, 
       }
   };
 
-  // --- WebGL Rendering (Unchanged) ---
+  // --- WebGL Rendering ---
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -336,99 +337,114 @@ export const SimulationCanvas: React.FC<SimulationCanvasProps> = ({ simulation, 
     const positionBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-      -1, -1, 1, -1, -1, 1,
-      -1, 1, 1, -1, 1, 1,
+      -1, -1,
+       1, -1,
+      -1,  1,
+      -1,  1,
+       1, -1,
+       1,  1,
     ]), gl.STATIC_DRAW);
 
-    const positionLoc = gl.getAttribLocation(program, 'position');
-    gl.enableVertexAttribArray(positionLoc);
-    gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
+    const positionLocation = gl.getAttribLocation(program, "position");
+    gl.enableVertexAttribArray(positionLocation);
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
 
-    // Texture Calcs
-    const totalBytes = gridSize * gridSize * tapeSize;
-    let texDim = 128;
-    while (texDim * texDim < totalBytes) {
-      texDim *= 2;
-    }
+    // Texture for State
+    const stateTexture = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, stateTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 
-    // Uniforms
-    gl.uniform1f(gl.getUniformLocation(program, 'uGridSize'), gridSize);
-    gl.uniform1f(gl.getUniformLocation(program, 'uBlockSize'), blockSize);
-    gl.uniform1f(gl.getUniformLocation(program, 'uTexSize'), texDim);
-
-    // Textures
-    const paletteTex = gl.createTexture();
+    // Texture for Palette
+    const paletteTexture = gl.createTexture();
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, paletteTex);
+    gl.bindTexture(gl.TEXTURE_2D, paletteTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    
+    // Upload Palette immediately (it doesn't change often/ever)
     const paletteData = generatePalette();
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, paletteData);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.uniform1i(gl.getUniformLocation(program, 'uPalette'), 1);
 
-    const stateTex = gl.createTexture();
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, stateTex);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, texDim, texDim, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, null);
-    gl.uniform1i(gl.getUniformLocation(program, 'uState'), 0);
+    // Uniforms
+    const uState = gl.getUniformLocation(program, "uState");
+    const uPalette = gl.getUniformLocation(program, "uPalette");
+    const uGridSize = gl.getUniformLocation(program, "uGridSize");
+    const uBlockSize = gl.getUniformLocation(program, "uBlockSize");
+    const uTexSize = gl.getUniformLocation(program, "uTexSize");
 
-    const renderLoop = () => {
+    // Render Loop
+    const render = () => {
+      if (!canvas) return;
+
+      // Update Physics (if this component owns the loop)
       if (running) {
-        simulation.step(speed);
+         simulation.step(speed);
       }
 
+      // Update Texture
+      const totalBytes = simulation.data.length;
+      const exactSide = Math.sqrt(totalBytes);
+      
       gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, stateTex);
+      gl.bindTexture(gl.TEXTURE_2D, stateTexture);
       
-      const heightNeeded = Math.ceil(simulation.data.length / texDim);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, texDim, heightNeeded, gl.LUMINANCE, gl.UNSIGNED_BYTE, simulation.data);
+      // Use LUMINANCE to pass raw bytes (0-255).
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, exactSide, exactSide, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, simulation.data);
+
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+
+      gl.useProgram(program);
       
+      gl.uniform1i(uState, 0);
+      gl.uniform1i(uPalette, 1);
+      gl.uniform1f(uGridSize, simulation.config.gridWidth);
+      gl.uniform1f(uBlockSize, Math.sqrt(simulation.config.tapeSize)); // Visual block size
+      gl.uniform1f(uTexSize, exactSide);
+
       gl.drawArrays(gl.TRIANGLES, 0, 6);
-      rafRef.current = requestAnimationFrame(renderLoop);
+
+      rafRef.current = requestAnimationFrame(render);
     };
-    
-    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    renderLoop();
+
+    render();
 
     return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      cancelAnimationFrame(rafRef.current);
     };
-  }, [simulation, running, speed, gridSize, tapeSize]);
+  }, [simulation, running, speed, canvasRef.current]);
 
   return (
     <div 
         ref={containerRef}
-        className={`w-full h-full relative overflow-hidden bg-black select-none ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+        className="w-full h-full relative overflow-hidden bg-gray-950 cursor-crosshair touch-none"
         onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerUp}
+        onPointerLeave={handlePointerUp} // Stop drag if leaving
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
     >
         <canvas 
-            ref={canvasRef} 
-            width={1024} 
-            height={1024} 
-            className="absolute top-0 left-0 touch-none origin-top-left"
-            style={{ 
+            ref={canvasRef}
+            width={baseSize} // Canvas resolution
+            height={baseSize}
+            style={{
                 width: `${baseSize}px`,
                 height: `${baseSize}px`,
-                imageRendering: 'pixelated',
-                transform: `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.k})`
+                transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`,
+                transformOrigin: 'top left',
+                imageRendering: 'pixelated' // Critical for retro look
             }}
         />
-        
-        {/* Zoom Hint */}
-        {transform.k === 1 && (
-            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-none text-white/90 text-xs font-mono select-none bg-black/60 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10 shadow-lg transition-opacity duration-500">
-                Scroll / Pinch to Zoom
-            </div>
-        )}
     </div>
   );
 };

@@ -127,7 +127,8 @@ export const analyzeEvolution = async (history: SimulationStats[], currentStats:
   // Use current census if available, otherwise fallback to the most recent historical census
   // (Census is expensive and usually runs every ~50 epochs)
   let censusData = currentStats.census;
-  let censusEpoch = currentStats.epoch;
+  // Use the specific epoch recorded for the census, or fallback to current
+  let censusEpoch = currentStats.lastCensusEpoch || currentStats.epoch;
 
   if (!censusData) {
       // Find last available census in history

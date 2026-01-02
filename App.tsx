@@ -13,8 +13,7 @@ type PanelMode = 'full' | 'small' | 'hidden';
 
 export const App: React.FC = () => {
   const [running, setRunning] = useState(true);
-  // Default to 4096 (1 epoch for 64x64 grid) per frame for reasonable initial pacing
-  const [speed, setSpeed] = useState(4096); 
+  const [speed, setSpeed] = useState(2000); // Interactions per frame
   const [showInfo, setShowInfo] = useState(false);
   const [showAnalysis, setShowAnalysis] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -41,7 +40,7 @@ export const App: React.FC = () => {
     instructionLimit: 8192, // 2^13 cycles
     topology: 'spatial', // Start with spatial (Section 2.2)
     seedingMode: 'random', // Default: 'random' (Hard/Sparse). Use 'balanced' for rich soup.
-    stepsPerFrame: 4096,
+    stepsPerFrame: 2000,
     seed: Math.floor(Math.random() * 1000000) // Default random seed
   });
   
@@ -336,9 +335,9 @@ export const App: React.FC = () => {
                 </div>
                 <input
                   type="range"
-                  min="1024"
-                  max="100000"
-                  step="1024"
+                  min="100"
+                  max="10000"
+                  step="100"
                   value={speed}
                   onChange={(e) => setSpeed(Number(e.target.value))}
                   className="w-full mt-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"

@@ -67,7 +67,8 @@ export class BFFSimulation {
     census: {
         speciesCount: 0,
         topSpecies: []
-    }
+    },
+    lastCensusEpoch: 0
   };
 
   // History of stats for analysis (Optimized: sparsely populated)
@@ -149,7 +150,8 @@ export class BFFSimulation {
       effectiveReplication: 0,
       entropy: metrics.entropy,
       zeroDensity: metrics.zeroDensity,
-      census: initialCensus
+      census: initialCensus,
+      lastCensusEpoch: 0
     };
     
     // Clear history and record the baseline snapshot
@@ -255,21 +257,29 @@ export class BFFSimulation {
     this.mutate();
     this.stats.epoch++;
     
+    // Performance Optimization Strategy:
+    // 1. Accumulators (Complexity, Copies) are updated per interaction (FAST). 
+    //    We just average them here.
     this.stats.avgComplexity = this.epochTotalComplexity / this.epochSize;
     this.stats.replicationRate = this.epochTotalCopies / this.epochSize;
     this.stats.effectiveReplication = this.epochTotalEffectiveCopies / this.epochSize;
     
-    // Efficiently calculate Entropy and Zero Density in one pass
+    // 2. Grid Metrics (Entropy, Zero Density) run every epoch to provide smooth real-time graphs.
+    //    Uses 10% sampling which is efficient enough (~1-2ms for 64x64 grid).
     const metrics = this.calculateGridMetrics();
     this.stats.entropy = metrics.entropy;
     this.stats.zeroDensity = metrics.zeroDensity;
 
-    // Trigger Census if needed
-    if (this.stats.epoch % this.CENSUS_INTERVAL === 0) {
+    // 3. Census (Species Dominance) is HEAVY.
+    //    It involves string creation and map sorting.
+    //    We run this on an interval but RETAIN the previous data to prevent UI flicker.
+    const isCensusEpoch = this.stats.epoch % this.CENSUS_INTERVAL === 0;
+
+    if (isCensusEpoch) {
         this.stats.census = this.performCensus();
-    } else {
-        this.stats.census = undefined;
-    }
+        this.stats.lastCensusEpoch = this.stats.epoch;
+    } 
+    // IMPORTANT: Else, keep existing this.stats.census. Do not overwrite with undefined.
 
     // --- Smart History Compression ---
     // Instead of pushing every epoch (which crashes memory on long runs),
@@ -277,7 +287,7 @@ export class BFFSimulation {
     let shouldLog = false;
     
     // 1. Always log census epochs
-    if (this.stats.census) {
+    if (isCensusEpoch) {
         shouldLog = true;
     } 
     // 2. Log if significant change occurred since last log
