@@ -98,17 +98,21 @@ export const explainOrganismCode = async (genome: Uint8Array): Promise<string> =
   }
 };
 
-export const analyzeEvolution = async (history: SimulationStats[], config: SimulationConfig): Promise<string> => {
+export const analyzeEvolution = async (history: SimulationStats[], currentStats: SimulationStats, config: SimulationConfig): Promise<string> => {
   if (!process.env.API_KEY) return "<p class='text-red-400'>Error: API Key is missing.</p>";
-  if (history.length === 0) return "<p>Insufficient data for analysis.</p>";
 
-  const latestStats = history[history.length - 1];
-  const latestEpoch = latestStats.epoch;
+  const latestEpoch = currentStats.epoch;
 
   // 1. Prepare Historical Data Points
-  // History is now already compacted by the simulation engine (Census snapshots + Significant Events)
-  // We can just use the last ~10 entries or so if it's very long, but passing all logic transitions is better.
-  const timelineSamples = history.length > 20 ? history.slice(history.length - 20) : history;
+  // Combine history with the current live stats to ensure the timeline reaches "Now"
+  const timelineSource = [...history];
+  
+  // Only push current stats if it's new (not a duplicate of the last history entry)
+  if (timelineSource.length === 0 || timelineSource[timelineSource.length - 1].epoch !== currentStats.epoch) {
+      timelineSource.push(currentStats);
+  }
+
+  const timelineSamples = timelineSource.length > 20 ? timelineSource.slice(timelineSource.length - 20) : timelineSource;
 
   const timelineStr = timelineSamples.map(h => {
       let censusInfo = "";
@@ -120,13 +124,29 @@ export const analyzeEvolution = async (history: SimulationStats[], config: Simul
   }).join('\n');
 
   // 2. Prepare Ecosystem Census Data
+  // Use current census if available, otherwise fallback to the most recent historical census
+  // (Census is expensive and usually runs every ~50 epochs)
+  let censusData = currentStats.census;
+  let censusEpoch = currentStats.epoch;
+
+  if (!censusData) {
+      // Find last available census in history
+      for (let i = history.length - 1; i >= 0; i--) {
+          if (history[i].census) {
+              censusData = history[i].census;
+              censusEpoch = history[i].epoch;
+              break;
+          }
+      }
+  }
+
   let censusHtml = "Census Pending";
   let topSpeciesList = "N/A";
   
-  if (latestStats.census) {
-      censusHtml = `Observed Species (Sampled): ${latestStats.census.speciesCount}`;
+  if (censusData) {
+      censusHtml = `Observed Species (Sampled at Epoch ${censusEpoch}): ${censusData.speciesCount}`;
       
-      const topSpeciesDescriptions = latestStats.census.topSpecies.map(s => {
+      const topSpeciesDescriptions = censusData.topSpecies.map(s => {
           const codeBytes = s.code.split(',').map(Number);
           const codeStr = codeBytes.map(byteToChar).join('');
           return `- Rank ${s.rank} (${(s.dominance * 100).toFixed(1)}%): \`${codeStr}\` (Entropy: ${s.entropy.toFixed(2)})`;
@@ -141,7 +161,7 @@ export const analyzeEvolution = async (history: SimulationStats[], config: Simul
   - **Topology:** ${config.topology}
   - **Census Data:** ${censusHtml}
   
-  **Dominant Ecosystem (Top 5 Species):**
+  **Dominant Ecosystem (Latest Census):**
   ${topSpeciesList}
   
   **Historical Timeline (Significant Events & Snapshots):**
@@ -174,7 +194,7 @@ export const analyzeEvolution = async (history: SimulationStats[], config: Simul
         <strong>Biodiversity:</strong> [Comment on the other top species. Are they variants of Rank 1 or distinct competitors?]
     </p>
     <p>
-        <strong>System Health:</strong> [Entropy: ${latestStats.entropy.toFixed(2)}]. [Interpret: Random, Crystallized, or Poisoned?]
+        <strong>System Health:</strong> [Entropy: ${currentStats.entropy.toFixed(2)}]. [Interpret: Random, Crystallized, or Poisoned?]
     </p>
   </div>
 
