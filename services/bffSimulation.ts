@@ -54,6 +54,7 @@ export class BFFSimulation {
   height: number;
   data: Uint8Array; // Stores all tapes flattened: [width * height * config.tapeSize]
   private interactionBuffer: Uint8Array; // Optimization: Reusable buffer to avoid GC in hot loops
+  private jumpTable: Int16Array; // Optimization: Pre-computed jump targets
   private rng: PRNG;
   
   // Statistics State
@@ -91,6 +92,7 @@ export class BFFSimulation {
     this.epochSize = this.width * this.height; // One epoch = statistical update of all cells
     this.data = new Uint8Array(this.width * this.height * this.config.tapeSize);
     this.interactionBuffer = new Uint8Array(this.config.tapeSize * 2);
+    this.jumpTable = new Int16Array(this.config.tapeSize * 2);
     this.rng = new PRNG(config.seed);
     this.reset();
   }
@@ -112,6 +114,7 @@ export class BFFSimulation {
         this.height = newConfig.gridHeight;
         this.data = new Uint8Array(this.width * this.height * this.config.tapeSize);
         this.interactionBuffer = new Uint8Array(this.config.tapeSize * 2);
+        this.jumpTable = new Int16Array(this.config.tapeSize * 2);
         // Important: Update RNG with the new seed!
         this.rng = new PRNG(this.config.seed);
         this.reset();
@@ -441,6 +444,48 @@ export class BFFSimulation {
     
     // Optimization: Hoist limit check
     const limit = this.config.instructionLimit;
+    const jumps = this.jumpTable;
+
+    // Optimization: Pre-compute Jump Table (O(TapeSize)) to save O(Complexity * TapeSize)
+    // Initialize jumps to -1 (invalid)
+    for(let i=0; i<len; i++) jumps[i] = -1;
+
+    for (let i = 0; i < len; i++) {
+        if (tape[i] === CMD_JZ) { // [
+            // Scan Forward
+            let depth = 1;
+            let scanIp = i + 1;
+            let scanned = 0;
+            // NOTE: We scan up to len (full tape wrap) to match runtime logic
+            while (depth > 0 && scanned < len) {
+                const instr = tape[scanIp & mask];
+                if (instr === CMD_JZ) depth++;
+                else if (instr === CMD_JNZ) depth--;
+                scanIp++;
+                scanned++;
+            }
+            if (depth === 0) {
+                // Point to matching ]
+                jumps[i] = (scanIp - 1) & mask;
+            }
+        } else if (tape[i] === CMD_JNZ) { // ]
+            // Scan Backward
+            let depth = 1;
+            let scanIp = i - 1;
+            let scanned = 0;
+            while (depth > 0 && scanned < len) {
+                const instr = tape[scanIp & mask];
+                if (instr === CMD_JNZ) depth++;
+                else if (instr === CMD_JZ) depth--;
+                scanIp--;
+                scanned++;
+            }
+            if (depth === 0) {
+                // Point to matching [
+                jumps[i] = (scanIp + 1) & mask;
+            }
+        }
+    }
 
     while (cycles < limit) {
       const currentIp = ip & mask;
@@ -465,38 +510,35 @@ export class BFFSimulation {
         case CMD_COPY_1_TO_0: // ,
           tape[head0 & mask] = tape[head1 & mask];
           copies++;
-          // Reading from neighbor usually, doesn't count as writing *to* them.
           break;
-        case CMD_JZ: 
+        case CMD_JZ: // [
           if (tape[head0 & mask] === 0) {
-            let depth = 1;
-            let scanIp = ip + 1;
-            let scanned = 0;
-            while (depth > 0 && scanned < len) {
-                const scanInstr = tape[scanIp & mask];
-                if (scanInstr === CMD_JZ) depth++;
-                else if (scanInstr === CMD_JNZ) depth--;
-                scanIp++;
-                scanned++;
-            }
-            if (depth === 0) ip = scanIp - 1; 
-            else return { complexity, copies, neighborWrites };
+             const target = jumps[currentIp];
+             if (target !== -1) {
+                 // Jump to matching ]
+                 // Loop logic: ip will increment at end.
+                 // We want next instruction to be AFTER ].
+                 // So ip should become target. ip++ -> target + 1. Correct.
+                 ip = target;
+             } else {
+                 // Unmatched bracket: Exit loop / Stop execution?
+                 // Original code would fail 'depth > 0' check and return.
+                 return { complexity, copies, neighborWrites };
+             }
           }
           break;
-        case CMD_JNZ: 
+        case CMD_JNZ: // ]
           if (tape[head0 & mask] !== 0) {
-             let depth = 1;
-             let scanIp = ip - 1;
-             let scanned = 0;
-             while (depth > 0 && scanned < len) {
-                 const scanInstr = tape[scanIp & mask];
-                 if (scanInstr === CMD_JNZ) depth++;
-                 else if (scanInstr === CMD_JZ) depth--;
-                 scanIp--;
-                 scanned++;
+             const target = jumps[currentIp];
+             if (target !== -1) {
+                 // Jump to matching [
+                 // Loop logic: ip will increment at end.
+                 // We want next instruction to be AFTER [. (Start of body)
+                 // So ip should become target. ip++ -> target + 1. Correct.
+                 ip = target;
+             } else {
+                 return { complexity, copies, neighborWrites };
              }
-             if (depth === 0) ip = scanIp + 1;
-             else return { complexity, copies, neighborWrites };
           }
           break;
         default: isValidOp = false; break;
