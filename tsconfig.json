@@ -25,5 +25,10 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "exclude": [
+    "assembly",
+    "node_modules",
+    "dist"
+  ]
 }

@@ -1,8 +1,16 @@
-import { GoogleGenAI, Content } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { BFFSimulation, CMD_LEFT, CMD_RIGHT, CMD_H1_DEC, CMD_H1_INC, CMD_DEC, CMD_INC, CMD_COPY_0_TO_1, CMD_COPY_1_TO_0, CMD_JZ, CMD_JNZ } from "./bffSimulation";
 import { SimulationConfig, SimulationStats } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+const ai = new GoogleGenAI({ 
+  apiKey: apiKey,
+  httpOptions: {
+    headers: {
+      'User-Agent': 'aistudio-build',
+    }
+  }
+});
 
 // --- SHARED CONTEXT & TERMINOLOGY ---
 const SCIENTIFIC_CONTEXT = `
@@ -56,7 +64,8 @@ const byteToChar = (byte: number) => {
 };
 
 export const explainOrganismCode = async (genome: Uint8Array): Promise<string> => {
-  if (!process.env.API_KEY) {
+  const currentKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+  if (!currentKey) {
       return `<div class="p-2 bg-red-900/30 border border-red-500/50 rounded text-red-200 text-xs">
           <strong>Error:</strong> API Key missing.
       </div>`;
@@ -87,7 +96,7 @@ export const explainOrganismCode = async (genome: Uint8Array): Promise<string> =
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-3.5-flash",
       contents: prompt,
     });
     
@@ -99,7 +108,8 @@ export const explainOrganismCode = async (genome: Uint8Array): Promise<string> =
 };
 
 export const analyzeEvolution = async (history: SimulationStats[], currentStats: SimulationStats, config: SimulationConfig): Promise<string> => {
-  if (!process.env.API_KEY) return "<p class='text-red-400'>Error: API Key is missing.</p>";
+  const currentKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+  if (!currentKey) return "<p class='text-red-400'>Error: API Key is missing.</p>";
 
   const latestEpoch = currentStats.epoch;
 
@@ -208,7 +218,7 @@ export const analyzeEvolution = async (history: SimulationStats[], currentStats:
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-pro-preview",
+      model: "gemini-3.1-pro-preview",
       contents: prompt,
       config: {
         systemInstruction: "You are a computational biologist. Output strictly formatted HTML.",
@@ -220,65 +230,5 @@ export const analyzeEvolution = async (history: SimulationStats[], currentStats:
   } catch (error) {
     console.error("Gemini Analysis Error:", error);
     return "<p class='text-red-400'>Failed to analyze simulation data. Check API Key or connection.</p>";
-  }
-};
-
-export const streamChat = async function* (history: Content[], message: string) {
-  if (!process.env.API_KEY) {
-      yield "Error: API Key is missing.";
-      return;
-  }
-
-  const chat = ai.chats.create({
-    model: 'gemini-3-flash-preview',
-    history: history,
-    config: {
-        systemInstruction: "You are a helpful scientific assistant for a simulation based on the paper 'Computational Life'. You explain concepts clearly.",
-    }
-  });
-
-  try {
-      const result = await chat.sendMessageStream({ message });
-      for await (const chunk of result) {
-          if (chunk.text) {
-              yield chunk.text;
-          }
-      }
-  } catch (error: any) {
-      yield `Error: ${error.message}`;
-  }
-};
-
-export const generateImage = async (prompt: string, size: "1K" | "2K" | "4K"): Promise<string | null> => {
-  if (!process.env.API_KEY) return null;
-
-  // We use gemini-3-pro-image-preview because imageSize config is required
-  const model = 'gemini-3-pro-image-preview';
-  
-  try {
-    const response = await ai.models.generateContent({
-      model: model,
-      contents: {
-        parts: [{ text: prompt }]
-      },
-      config: {
-        imageConfig: {
-            aspectRatio: "1:1",
-            imageSize: size
-        }
-      }
-    });
-    
-    // Extract image
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-        if (part.inlineData) {
-            return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-        }
-    }
-    return null;
-
-  } catch (e) {
-      console.error(e);
-      return null;
   }
 };

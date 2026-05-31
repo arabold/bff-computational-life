@@ -1,5 +1,6 @@
 {
   "name": "Computational Life: BFF Simulation",
   "description": "A visualization of the 'Computational Life' paper, simulating self-replicating programs (BFF language) in a primordial soup using WebGL.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": []
 }

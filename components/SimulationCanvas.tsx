@@ -379,6 +379,9 @@ export const SimulationCanvas: React.FC<SimulationCanvasProps> = ({ simulation, 
     const uTexSize = gl.getUniformLocation(program, "uTexSize");
 
     // Render Loop
+    let lastUploadedEpoch = -1;
+    let lastLoadedConfigSeed = -1;
+
     const render = () => {
       if (!canvas) return;
 
@@ -387,15 +390,22 @@ export const SimulationCanvas: React.FC<SimulationCanvasProps> = ({ simulation, 
          simulation.step(speed);
       }
 
-      // Update Texture
+      // Update Texture (Only upload of bytes to GPU when epoch/data actually changes, or running)
+      const currentEpoch = simulation.stats.epoch;
+      const currentSeed = simulation.config.seed;
+      const needUpload = running || lastUploadedEpoch !== currentEpoch || lastLoadedConfigSeed !== currentSeed;
       const totalBytes = simulation.data.length;
       const exactSide = Math.sqrt(totalBytes);
-      
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, stateTexture);
-      
-      // Use LUMINANCE to pass raw bytes (0-255).
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, exactSide, exactSide, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, simulation.data);
+
+      if (needUpload) {
+         gl.activeTexture(gl.TEXTURE0);
+         gl.bindTexture(gl.TEXTURE_2D, stateTexture);
+         
+         // Use LUMINANCE to pass raw bytes (0-255).
+         gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, exactSide, exactSide, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, simulation.data);
+         lastUploadedEpoch = currentEpoch;
+         lastLoadedConfigSeed = currentSeed;
+      }
 
       gl.viewport(0, 0, canvas.width, canvas.height);
       gl.clear(gl.COLOR_BUFFER_BIT);

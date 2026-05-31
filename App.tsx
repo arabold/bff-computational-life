@@ -19,6 +19,7 @@ export const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<string | null>(null);
+  const [wasmActive, setWasmActive] = useState(false);
   
   // Inspector State
   const [selectedCell, setSelectedCell] = useState<{x: number, y: number} | null>(null);
@@ -100,8 +101,9 @@ export const App: React.FC = () => {
       const currentStats = simulation.stats;
       const dt = (now - lastMeasureRef.current.time) / 1000; // Delta time in seconds
       
-      // Update stats for UI
+      // Update stats and WASM status for UI
       setStats({ ...currentStats });
+      setWasmActive(simulation.isWasmActive);
 
       // Update Inspector Data if cell is selected
       if (selectedCell) {
@@ -173,9 +175,16 @@ export const App: React.FC = () => {
           {/* Header & Window Controls */}
           <div className="flex justify-between items-start">
             <div>
-              <h1 className="text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500 mb-1 leading-tight">
-                Computational Life
-              </h1>
+              <div className="flex items-center gap-2 mb-1">
+                <h1 className="text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500 leading-tight">
+                  Computational Life
+                </h1>
+                {wasmActive && (
+                  <span className="text-[9px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold px-1 rounded uppercase tracking-wider h-4 flex items-center select-none shadow-[0_0_10px_rgba(52,211,153,0.15)]" title="WebAssembly Accelerated Execution active">
+                    WASM
+                  </span>
+                )}
+              </div>
               <p className="text-[10px] text-gray-400 uppercase tracking-widest flex items-center gap-2">
                 BFF Simulation 
                 <span 
